@@ -1,0 +1,546 @@
+\documentclass[english,aspectratio=43,nohandout]{beamer}
+\usetheme{Portland}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{babel}
+\usepackage{bera}
+
+\title{Iteration \& Loops in Puppet 4}
+\subtitle{Repeating yourself using the Future Parser}
+\date{Puppet Camp Amsterdam\\February 5th, 2016}
+\author{Stefan Möding}
+\titlegraphic{\includegraphics[scale=0.15]{gfx/pclogo}}
+
+% https://ttboj.wordpress.com/2013/11/17/iteration-in-puppet/
+% https://tobrunet.ch/2013/01/iterate-over-datastructures-in-puppet-manifests/
+% https://www.devco.net/archives/2015/12/16/iterating-in-puppet.php
+% https://docs.puppetlabs.com/puppet/latest/reference/lang_iteration.html
+
+\usepackage{textcomp}
+\usepackage{booktabs}
+\usepackage{appendixnumberbeamer}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{tikz}
+\usetikzlibrary{backgrounds,shadows,shapes}
+
+\tikzstyle{background grid}=[draw,black!20,step=.25cm]
+\tikzstyle{redmark}=[puppetorange,line width=1pt]
+\tikzstyle{nopadding}=[inner sep=0pt]
+\tikzstyle{every picture}+=[remember picture]
+
+% http://tex.stackexchange.com/questions/84143/fancy-arrows-with-tikz
+\tikzfading[
+  name=arrowfading,
+  top color=transparent!0,
+  bottom color=transparent!30
+]
+
+\newcommand*{\tikdownarrow}[1]{%
+  \tikz[
+    baseline=(A.base),
+    font=\Huge\sffamily
+  ]
+  \node[
+    single arrow,
+    single arrow head extend=10pt,
+    single arrow tip angle=130,
+    shape border rotate=270,
+    draw,
+    inner sep=8pt,
+    top color=white,
+    bottom color=puppetorange,
+    general shadow={fill=black,shadow yshift=-3pt,path fading=arrowfading}
+  ] (A) {#1};%
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\usepackage{listings}
+
+\lstdefinelanguage{Puppet}{%
+  morekeywords=[1]{and, application, attr, case, class, consumes, default,
+    define, else, elsif, environment, false, function, if, import, in,
+    inherits, node, or, private, produces, true, type, undef, unless,
+    augeas, cron, exec, file, filebucket, group, host, interface, k5login,
+    macauthorization, mailalias, maillist, mcx, mount, notify, package,
+    resources, router, schedule, scheduled_task, selboolean, selmodule
+    service, ssh_authorized_key, sshkey, stage, tidy, user, vlan, yumrepo,
+    zfs, zone, zpool},
+  morekeywords=[2]{alert, assert_type, contain, create_resources, crit,
+    debug, defined, digest, each, emerg, epp, err, fail, file, filter,
+    fqdn_rand, generate, hiera, hiera_array, hiera_hash, hiera_, nclude,
+    include, info, inline_epp, inline_template, lookup, map, match, md5,
+    notice, real, ze, reduce, regsubst, require, scanf, sha1, shellquote,
+    slice, split, sprintf, tag, tagged, template, versioncmp, warning, with},
+  morekeywords=[3]{abs, any2array, base64, basename, bool2num, capitalize,
+    ceiling, chomp, chop, concat, convert_base, count, defined_with_params,
+    delete, delete_at, delete_values, delete_undef_values, difference,
+    dirname, dos2unix, downcase, empty, ensure_packages, ensure_resource,
+    flatten, floor, fqdn_rand_string, fqdn_rotate, get_module_path, getparam,
+    getvar, grep, has_interface_with, has_ip_address, has_ip_network,
+    has_key, hash, intersection, is_array, is_bool, is_domain_name, is_float,
+    is_function_available, is_hash, is_integer, is_ip_address,
+    is_mac_address, is_numeric, is_string, join, join_keys_to_values, keys,
+    loadyaml, load_module_metadata, lstrip, max, member, merge, min,
+    num2bool, parsejson, parseyaml, pick, prefix, assert_private, pw_hash,
+    range, reject, reverse, rstrip, shuffle, size, sort, squeeze, str2bool,
+    str2saltedsha512, strftime, strip, suffix, swapcase, time, to_bytes,
+    try_get_value, type3x, type_of, union, unique, unix2dos, upcase,
+    uriescape, validate_absolute_path, validate_array, validate_augeas,
+    validate_bool, validate_cmd, validate_hash, validate_integer,
+    validate_numeric, validate_re, validate_slength, validate_string, values,
+    values_at, zip, file_line},
+  sensitive,%
+  morecomment=[l]\#,%
+  morestring=[b]",%
+  morestring=[b]',%
+}[keywords,comments,strings]
+
+\lstset{%
+  language=Puppet,%
+  basicstyle=\ttfamily\small,%
+  frame=none,%
+  showstringspaces=false,%
+  identifierstyle=\color{black},%
+  keywordstyle={[1]\color{puppetblue}\textbf},%
+  keywordstyle={[2]\color{puppetblue}\textbf},%
+  keywordstyle={[3]\color{puppetblue}\textbf},%
+  stringstyle=\color{puppetviolet2},%
+  commentstyle=\itshape\color{puppetorange},%
+  emptylines=1,%
+  aboveskip=2ex,%
+  belowskip=2ex,%
+  captionpos=b,%
+  breaklines=true,%
+  breakatwhitespace=true,%
+}
+
+\usepackage{array}
+\usepackage{graphicx,color}
+\graphicspath{ {./gfx/} }
+
+\newcommand{\iconentry}[2]{\includegraphics[scale=0.15]{#1} & #2\tabularnewline}
+\newcommand{\mailto}[1]{\href{mailto:#1}{\nolinkurl{#1}}}
+
+% Disable footnote numbers
+\renewcommand{\thefootnote}{\relax}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{document}
+
+\begin{frame}
+\titlepage
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Introduction}
+\subsection{Does Puppet need loops?}
+
+\begin{frame}{\insertsection}{\insertsubsection}
+
+Loops in Puppet?\pause
+\begin{itemize}
+\item Puppet describes a state to enforce
+\item A resource can't be declared more than once
+\item So why would we need loops?
+\end{itemize}
+
+\vspace{\baselineskip}\pause
+
+Use case: create resources for each array/hash item
+\begin{itemize}
+\item Avoid copy/paste manifests
+\end{itemize}
+
+\vspace{\baselineskip}\pause
+
+\begin{block}{Purpose}
+Iterate an array or hash and do something for each element
+\end{block}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Evolution of Puppet}
+\subsection{Puppet 3}
+
+\begin{frame}{\insertsection}{\insertsubsection}
+
+Loops in Puppet 3
+\begin{itemize}
+\item Essentially no loop statements
+\end{itemize}
+
+\vspace{\baselineskip}\pause
+
+Workarounds
+\begin{itemize}
+\item Array of strings as resource title
+\item \texttt{create\_resources} with a parameter hash
+\item Recursion using a defined type
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Puppet 3 -- Example: array as resource title}
+
+\begin{frame}{\insertsection}{\insertsubsection}
+\lstinputlisting{lst/arrayparams.pp}
+
+\vspace{\baselineskip}\pause
+
+Limitations
+\begin{itemize}
+\item Resource parameters affect all resources
+\item Defined type required for more challenging tasks
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Puppet 3 -- Example: \texttt{create\_resources}}
+
+\begin{frame}{\insertsection}{\insertsubsection}
+
+\texttt{create\_resources}
+\begin{itemize}
+\item Indirect way to create resources
+\item Uses type name and hash of type title \& parameters
+\end{itemize}
+
+\vspace{\baselineskip}\pause
+
+\lstinputlisting{lst/create_resources-1.pp}\pause
+\lstinputlisting{lst/create_resources-2.pp}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{frame}{\insertsection}{\insertsubsection}
+\lstinputlisting[basicstyle=\tiny]{lst/create_resources-3.pp}
+
+\vspace{\baselineskip}\pause
+
+Limitations
+\begin{itemize}
+\item Purpose of code is not obvious at a first glance
+\item Complex resources require complex regular expressions
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Puppet 3 -- Example: recursion}
+
+\begin{frame}{\insertsection}{\insertsubsection}
+\lstinputlisting{lst/recurse.pp}
+
+\vspace{\baselineskip}\pause
+
+Limitations
+\begin{itemize}
+\item Needs a way to guarantee unique resource names
+\item Error: Somehow looped more than 1000 times \dots
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Puppet 4}
+
+\begin{frame}{\insertsection}{\insertsubsection}
+Loops in Puppet 4\pause
+\begin{itemize}
+\item \texttt{each}
+\item \texttt{map}
+\item \texttt{filter}
+\item \texttt{reduce}
+\item \texttt{slice}
+\end{itemize}
+
+\vspace{\baselineskip}\pause
+
+Also available in Puppet 3.x using \lstinline{parser = future}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Loops in Puppet 4}
+\subsection{Syntax}
+
+\begin{frame}{\insertsection}{\insertsubsection}
+
+\begin{tikzpicture}%[show background grid]
+\node[nopadding]{\lstinputlisting{lst/syntax-1.pp}};
+%\fill (0,0) circle (2pt);
+\coordinate (para) at (-2.1,-0.32);
+\coordinate (item) at (-0.4,-0.32);
+\coordinate (code) at (2.0,-0.32);
+\end{tikzpicture}
+
+\vspace{\baselineskip}
+
+\begin{columns}[onlytextwidth]
+\begin{column}[c]{0.55\textwidth}
+\begin{itemize}
+\item<2-> \tikz[anchor=base,baseline]%
+  \node[nopadding] (ptext) {parameter};
+\item<3-> loop variable in
+  \tikz[anchor=base,baseline]%
+  \node[nopadding] (itext) {\lstinline{|} \dots \lstinline{|}};
+\item<4-> code block (\emph{lambda}) in
+  \tikz[anchor=base,baseline]%
+  \node[nopadding] (ctext) {\lstinline{\{} \dots \lstinline{\}}};
+\end{itemize}
+\end{column}
+
+\begin{tikzpicture}[overlay]
+\draw<2->[->,redmark] (ptext) -- (para);
+\draw<3->[->,redmark] (itext) -- (item);
+\draw<4->[->,redmark] (ctext) -- (code);
+\end{tikzpicture}
+
+\begin{column}<5->[t]{0.38\textwidth}
+\tiny
+\begin{tabular}{ll}\toprule
+  type of parameter & unit of work\\\midrule
+  array             & single element\\
+  hash              & key-value pair\\
+  string            & character\\\bottomrule
+\end{tabular}
+\end{column}
+\end{columns}
+
+\vspace{3\baselineskip}
+
+\visible<6->{
+Alternative object-oriented syntax
+\lstinputlisting{lst/syntax-2.pp}}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{each}}
+\begin{frame}{\insertsection}{\insertsubsection}
+
+\begin{block}{\texttt{each}}
+Generic loop function
+\end{block}
+
+\vspace{\baselineskip}\pause
+
+\begin{itemize}
+\item Execute block of code for each item
+\item Return original data structure unchanged
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{each} -- Example: Declare resource for each array value}
+\begin{frame}{\insertsection}{\insertsubsection}
+\lstinputlisting{lst/each-1.pp}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{each} -- Example: More program logic in the code block}
+\begin{frame}{\insertsection}{\insertsubsection}
+\lstinputlisting{lst/each-2.pp}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{map}}
+\begin{frame}{\insertsection}{\insertsubsection}
+
+\begin{block}{\texttt{map}}
+Transform one data structure into another
+\end{block}
+
+\vspace{\baselineskip}\pause
+
+\begin{itemize}
+\item Execute block of code for each item
+\item Use return value of each cycle to build new data structure
+\item Return new data structure
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{map} -- Example: Iterate string character by character}
+\begin{frame}{\insertsection}{\insertsubsection}
+\lstinputlisting[linerange={1-11}]{lst/map-1.pp}\pause
+\lstinputlisting[linerange={13}]{lst/map-1.pp}\pause
+\lstinputlisting[xleftmargin=2em]{lst/map-1.out}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{map} -- Example: Generate array of hashes from an array}
+\begin{frame}{\insertsection}{\insertsubsection}
+\lstinputlisting{lst/map-2a.pp}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{frame}{\insertsection}{\insertsubsection}
+\lstinputlisting{lst/map-2.pp}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{filter}}
+\begin{frame}{\insertsection}{\insertsubsection}
+
+\begin{block}{\texttt{filter}}
+Conditionally remove items from arrays and hashes
+\end{block}
+
+\vspace{\baselineskip}\pause
+
+\begin{itemize}
+\item Execute block of code for each item
+\item Return \texttt{true} if item belongs to the result,
+  \texttt{false} otherwise
+\item Collect wanted items into new data structure
+\item Return new data structure
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{filter} -- Example: Filter structured facts}
+\begin{frame}{\insertsection}{\insertsubsection}
+\lstinputlisting{lst/facts.pp}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{frame}{\insertsection}{\insertsubsection}
+\lstinputlisting{lst/filter-1.pp}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{filter} -- Example: Determine Java JDK to install}
+\begin{frame}{\insertsection}{\insertsubsection}
+\lstinputlisting[linerange={1-16}]{lst/filter-2.pp}
+\end{frame}
+
+\begin{frame}{\insertsection}{\insertsubsection}
+\lstinputlisting[linerange={18-34}]{lst/filter-2.pp}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{reduce}}
+
+\begin{frame}{\insertsection}{\insertsubsection}
+
+\begin{block}{\texttt{reduce}}
+Incremental processing or calculation
+\end{block}
+
+\vspace{\baselineskip}\pause
+
+\begin{itemize}
+\item Execute block of code for each item
+\item Update a memorized result calculated so far
+\item Pass memorized result into next cycle
+\item Return memorized result from last cycle
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{reduce} -- Example: character filter}
+
+\begin{frame}{\insertsection}{\insertsubsection}
+\lstinputlisting{lst/reduce-1.pp}\pause
+\lstinputlisting[xleftmargin=2em]{lst/reduce-1.out}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{reduce} -- Example: Better validation rules and error messages}
+
+\begin{frame}{\insertsection}{\insertsubsection}
+Excerpt from \lstinline{/etc/gai.conf}
+\lstinputlisting{lst/gai.conf}
+
+\vspace{\baselineskip}\pause
+
+Implement a validation rule to prevent duplicated values
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{frame}{\insertsection}{\insertsubsection}
+\lstinputlisting{lst/reduce-2.pp}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{frame}{\insertsection}{\insertsubsection}
+\lstinputlisting{lst/reduce-3.pp}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{slice}}
+
+\begin{frame}{\insertsection}{\insertsubsection}
+
+\begin{block}{\texttt{slice}}
+Divide an array into smaller pieces and process each part
+\end{block}
+
+\vspace{\baselineskip}\pause
+
+\begin{itemize}
+\item Execute block of code for groups of $n$ items
+%\item Return memorized result from last cycle
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{slice} -- Example: Iterate array in pairs}
+
+\begin{frame}{\insertsection}{\insertsubsection}
+\lstinputlisting{lst/slice-1.pp}\pause
+\lstinputlisting[xleftmargin=2em]{lst/slice-1.out}
+
+\vspace{\baselineskip}\pause
+
+Unfortunately no \textit{real life}\texttrademark{} example \dots
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Wrap up}
+
+\begin{frame}{\insertsection}{\insertsubsection}
+
+Puppet 4 adds five powerful iteration functions
+
+\vspace{\baselineskip}\pause
+
+Use cases: process arrays/hashes/strings to
+\begin{itemize}
+\item individually manage each item\pause
+\item transform the data structure\pause
+\item select items based on conditions\pause
+\item create validations with better error messages
+%\item Implement user functions in Puppet instead of Ruby
+\end{itemize}
+
+\vspace{\baselineskip}\pause
+
+Arrays and hashes can be
+\begin{itemize}
+\item class/type parameters
+\item structured facts
+\end{itemize}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Contact}
+\begin{frame}{\insertsection}{\strut}
+
+%Icons from: https://www.iconfinder.com/search/?q=iconset:simple-icons
+\begin{tabular}{m{40pt}l}
+\iconentry{email}{\mailto{stm@kill-9.net}}
+\iconentry{twitter}{\nolinkurl{@UnixMagus}}
+\iconentry{blogger}{\url{http://www.moeding.net}}
+\iconentry{github}{\url{https://github.com/smoeding}}
+\iconentry{puppetforge}{\url{https://forge.puppetlabs.com/stm}}
+\end{tabular}
+\footnote{\tiny Icons by Dan Leech, \url{http://simpleicons.org}}
+\end{frame}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%\appendix
+%\section{\appendixname}
+%\begin{frame}{\appendixname}{\insertsection}
+%\end{frame}
+
+\end{document}
